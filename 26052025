@@ -383,3 +383,161 @@ public class BalanceEnqService_Child {
         return result;
     }
 }
+
+-------------₹₹₹₹₹₹₹₹₹+++++++++------
+
+package com.tcs.bancs.microservices.services;
+
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+import javax.sql.DataSource;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+
+import com.microfocus.cobol.runtimeservices.RunUnit;
+import com.jvm.balance.JVMAVBL.LsRecordArea;
+import com.jvm.balance.JVMCUSVCC;
+import com.jvm.balance.JVMCUSVCC.LsAccountNumber;
+import com.jvm.balance.JVMCUSVCC.LsArrayIndex;
+import com.jvm.balance.JVMCUSVCC.LsConnectionUrl;
+import com.jvm.balance.JVMCUSVCC.LsDriverClass;
+import com.jvm.balance.JVMCUSVCC.LsErrorNumber;
+import com.jvm.balance.JVMCUSVCC.LsOutputArray;
+
+public class BalanceEnqService_Child {
+
+    @Value("${day.datasource.jdbc-url}")
+    private String dayJdbcUrl;
+
+    @Value("${day.datasource.username}")
+    private String dayUsername;
+
+    @Value("${day.datasource.password}")
+    private String dayPassword;
+
+    @Value("${day.datasource.driver-class-name}")
+    private String dayDriverClass;
+
+    @Value("${night.datasource.jdbc-url}")
+    private String nightJdbcUrl;
+
+    @Value("${night.datasource.username}")
+    private String nightUsername;
+
+    @Value("${night.datasource.password}")
+    private String nightPassword;
+
+    @Value("${night.datasource.driver-class-name}")
+    private String nightDriverClass;
+
+    private static final Logger logger = LoggerFactory.getLogger(BalanceEnqService_Child.class);
+    private static final AtomicInteger counter = new AtomicInteger(0);
+
+    private static final int POOL_SIZE = 30;
+
+    private static final RunUnit[] sharedRunUnits = new RunUnit[POOL_SIZE];
+    private static final JVMCUSVCC[] sharedJvms = new JVMCUSVCC[POOL_SIZE];
+    private static final Lock[] locks = new ReentrantLock[POOL_SIZE];
+
+    static {
+        try {
+            for (int i = 0; i < POOL_SIZE; i++) {
+                sharedRunUnits[i] = new RunUnit();
+                sharedJvms[i] = new JVMCUSVCC();
+                sharedRunUnits[i].Add(sharedJvms[i]);
+                locks[i] = new ReentrantLock();
+            }
+            logger.info("Initialized {} shared RunUnits for Balance Enquiry.", POOL_SIZE);
+        } catch (Exception e) {
+            logger.error("Error initializing shared RunUnits", e);
+        }
+    }
+
+    public List<String> Balance_Enquiry_Child(String accno, DataSource datasource, String dbflag, String inpcommonarea, String refno) {
+        logger.info("VC---Balance_Enquiry_Child started---RefNo: {}", refno);
+
+        int index = counter.getAndIncrement() % POOL_SIZE;
+        RunUnit selectedRunUnit = sharedRunUnits[index];
+        JVMCUSVCC selectedJvm = sharedJvms[index];
+        Lock selectedLock = locks[index];
+
+        String connectionString = "";
+        String driverclass = "";
+
+        if ("N".equalsIgnoreCase(dbflag)) {
+            connectionString = nightJdbcUrl.split("@")[0] + nightUsername + "/" + nightPassword + "@" + nightJdbcUrl.split("@")[1];
+            driverclass = nightDriverClass;
+        } else if ("Y".equalsIgnoreCase(dbflag)) {
+            connectionString = dayJdbcUrl.split("@")[0] + dayUsername + "/" + dayPassword + "@" + dayJdbcUrl.split("@")[1];
+            driverclass = dayDriverClass;
+        }
+
+        List<String> result = new ArrayList<>();
+        String outputRes = "", combinedRes = "", errno = "0000";
+        int recordCount = 0;
+
+        LsAccountNumber input1 = new LsAccountNumber();
+        LsConnectionUrl input2 = new LsConnectionUrl();
+        LsDriverClass input3 = new LsDriverClass();
+        LsRecordArea inputRec = new LsRecordArea();
+        LsOutputArray output1 = new LsOutputArray();
+        LsErrorNumber output2 = new LsErrorNumber();
+        LsArrayIndex output3 = new LsArrayIndex();
+
+        input1.setLsAccountNumber(String.format("%017d", new BigInteger(accno)));
+        input2.setLsConnectionUrl(connectionString);
+        input3.setLsDriverClass(driverclass);
+        inputRec.setLsRecordArea(inpcommonarea);
+
+        try {
+            if (selectedLock.tryLock(2, TimeUnit.SECONDS)) {
+                try {
+                    selectedRunUnit.Call("JVMCUSVCC",
+                        input1.get_Reference(), input2.get_Reference(), input3.get_Reference(),
+                        output2.get_Reference(), output1.get_Reference(), output3.get_Reference(),
+                        inputRec.get_Reference(), null);
+
+                    errno = output2.getLsErrorNumber();
+                    outputRes = output1.getLsOutputArray();
+                    recordCount = output3.getLsArrayIndex();
+
+                    List<String> allRecords = new ArrayList<>();
+                    for (int i = 0; i + 98 <= outputRes.length(); i += 98) {
+                        String chunk = outputRes.substring(i, i + 98).trim();
+                        if (chunk.isEmpty()) break;
+                        allRecords.add(chunk);
+                    }
+
+                    combinedRes = String.join("", allRecords);
+                    if (combinedRes.trim().isEmpty()) {
+                        errno = output2.getLsErrorNumber();
+                    }
+
+                } finally {
+                    selectedLock.unlock();
+                }
+            } else {
+                logger.warn("Timeout acquiring lock for Balance Enquiry.");
+                errno = "0155";
+            }
+        } catch (Exception e) {
+            logger.error("Exception during COBOL call: {}", e.getMessage(), e);
+            errno = "3293";
+        }
+
+        result.add(combinedRes);
+        result.add(String.valueOf(recordCount - 1));
+        result.add(errno);
+
+        logger.info("VC---Balance_Enquiry_Child ended---RefNo: {}", refno);
+        return result;
+    }
+}
