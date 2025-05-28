@@ -580,3 +580,279 @@ public class BalanceEnqService_Child {
         }
     }
 }
+
+
+++++++++++++23333333333
+
+package com.tcs.bancs.microservices.services;
+
+import java.math.BigInteger;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.sql.DataSource;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.microfocus.cobol.runtimeservices.RunUnit;
+
+import com.jvm.balance.JVMCUSVCC;
+import com.jvm.balance.JVMAVBL.LsRecordArea;
+import com.jvm.balance.JVMCUSVCC.LsAccountNumber;
+import com.jvm.balance.JVMCUSVCC.LsOutputArray;
+import com.jvm.balance.JVMCUSVCC.LsErrorNumber;
+import com.jvm.balance.JVMCUSVCC.LsArrayIndex;
+
+import com.jvm.balance1.JVMCUSVCC1;
+import com.jvm.balance1.JVMAVBL1.LsRecordArea1;
+import com.jvm.balance1.JVMCUSVCC1.LsAccountNumber1;
+import com.jvm.balance1.JVMCUSVCC1.LsOutputArray1;
+import com.jvm.balance1.JVMCUSVCC1.LsErrorNumber1;
+import com.jvm.balance1.JVMCUSVCC1.LsArrayIndex1;
+
+import com.jvm.balance2.JVMCUSVCC2;
+import com.jvm.balance2.JVMAVBL2.LsRecordArea2;
+import com.jvm.balance2.JVMCUSVCC2.LsAccountNumber2;
+import com.jvm.balance2.JVMCUSVCC2.LsOutputArray2;
+import com.jvm.balance2.JVMCUSVCC2.LsErrorNumber2;
+import com.jvm.balance2.JVMCUSVCC2.LsArrayIndex2;
+
+import com.jvm.balance3.JVMCUSVCC3;
+import com.jvm.balance3.JVMAVBL3.LsRecordArea3;
+import com.jvm.balance3.JVMCUSVCC3.LsAccountNumber3;
+import com.jvm.balance3.JVMCUSVCC3.LsOutputArray3;
+import com.jvm.balance3.JVMCUSVCC3.LsErrorNumber3;
+import com.jvm.balance3.JVMCUSVCC3.LsArrayIndex3;
+
+import com.jvm.balance4.JVMCUSVCC4;
+import com.jvm.balance4.JVMAVBL4.LsRecordArea4;
+import com.jvm.balance4.JVMCUSVCC4.LsAccountNumber4;
+import com.jvm.balance4.JVMCUSVCC4.LsOutputArray4;
+import com.jvm.balance4.JVMCUSVCC4.LsErrorNumber4;
+import com.jvm.balance4.JVMCUSVCC4.LsArrayIndex4;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class BalanceEnqService_Child {
+
+    private static final Logger logger = LoggerFactory.getLogger(BalanceEnqService_Child.class);
+
+    private static final int POOL_SIZE = 10;
+    private static final List<RunUnitWrapper> runUnitPool = new ArrayList<>(POOL_SIZE);
+    private static final AtomicInteger roundRobinIndex = new AtomicInteger(0);
+
+    static {
+        try {
+            for (int i = 0; i < POOL_SIZE; i++) {
+                int variant = i % 5;
+                RunUnit runUnit = new RunUnit();
+                Object cobolInstance;
+                switch (variant) {
+                    case 0:
+                        cobolInstance = new JVMCUSVCC();
+                        break;
+                    case 1:
+                        cobolInstance = new JVMCUSVCC1();
+                        break;
+                    case 2:
+                        cobolInstance = new JVMCUSVCC2();
+                        break;
+                    case 3:
+                        cobolInstance = new JVMCUSVCC3();
+                        break;
+                    case 4:
+                        cobolInstance = new JVMCUSVCC4();
+                        break;
+                    default:
+                        throw new IllegalStateException("Unexpected variant index: " + variant);
+                }
+                runUnit.Add(cobolInstance);
+                runUnitPool.add(new RunUnitWrapper(runUnit, cobolInstance, new Object(), variant));
+                logger.info("Initialized shared RunUnit #" + (i + 1) + " with COBOL variant " + variant);
+            }
+        } catch (Exception e) {
+            logger.error("Error initializing shared RunUnits: {}", e.getMessage(), e);
+        }
+    }
+
+    public List<String> Balance_Enquiry_Child(String accno, DataSource datasource, String inpcommonarea, String refno) {
+        logger.info("VC---Balance_Enquiry_Child started---VC | RefNo: {}", refno);
+
+        List<String> response = new ArrayList<>();
+        List<String> allRecords = new ArrayList<>();
+
+        String errno = "";
+        String outputRes = "";
+        int recordCountOut = 0;
+
+        int poolIndex = roundRobinIndex.getAndUpdate(i -> (i + 1) % POOL_SIZE);
+        RunUnitWrapper wrapper = runUnitPool.get(poolIndex);
+
+        try (Connection connection = datasource.getConnection()) {
+            synchronized (wrapper.lock) {
+                switch (wrapper.variant) {
+                    case 0: {
+                        LsAccountNumber input1 = new LsAccountNumber();
+                        LsRecordArea inputRec = new LsRecordArea();
+                        LsOutputArray output1 = new LsOutputArray();
+                        LsErrorNumber output2 = new LsErrorNumber();
+                        LsArrayIndex output3 = new LsArrayIndex();
+
+                        input1.setLsAccountNumber(String.format("%017d", new BigInteger(accno)));
+                        inputRec.setLsRecordArea(inpcommonarea);
+
+                        wrapper.runUnit.Call("JVMCUSVCC",
+                                input1.get_Reference(),
+                                output2.get_Reference(),
+                                output1.get_Reference(),
+                                output3.get_Reference(),
+                                inputRec.get_Reference(),
+                                connection);
+
+                        errno = output2.getLsErrorNumber();
+                        outputRes = output1.getLsOutputArray();
+                        recordCountOut = output3.getLsArrayIndex();
+                        break;
+                    }
+                    case 1: {
+                        LsAccountNumber1 input1 = new LsAccountNumber1();
+                        LsRecordArea1 inputRec = new LsRecordArea1();
+                        LsOutputArray1 output1 = new LsOutputArray1();
+                        LsErrorNumber1 output2 = new LsErrorNumber1();
+                        LsArrayIndex1 output3 = new LsArrayIndex1();
+
+                        input1.setLsAccountNumber1(String.format("%017d", new BigInteger(accno)));
+                        inputRec.setLsRecordArea1(inpcommonarea);
+
+                        wrapper.runUnit.Call("JVMCUSVCC1",
+                                input1.get_Reference(),
+                                output2.get_Reference(),
+                                output1.get_Reference(),
+                                output3.get_Reference(),
+                                inputRec.get_Reference(),
+                                connection);
+
+                        errno = output2.getLsErrorNumber1();
+                        outputRes = output1.getLsOutputArray1();
+                        recordCountOut = output3.getLsArrayIndex1();
+                        break;
+                    }
+                    case 2: {
+                        LsAccountNumber2 input1 = new LsAccountNumber2();
+                        LsRecordArea2 inputRec = new LsRecordArea2();
+                        LsOutputArray2 output1 = new LsOutputArray2();
+                        LsErrorNumber2 output2 = new LsErrorNumber2();
+                        LsArrayIndex2 output3 = new LsArrayIndex2();
+
+                        input1.setLsAccountNumber2(String.format("%017d", new BigInteger(accno)));
+                        inputRec.setLsRecordArea2(inpcommonarea);
+
+                        wrapper.runUnit.Call("JVMCUSVCC2",
+                                input1.get_Reference(),
+                                output2.get_Reference(),
+                                output1.get_Reference(),
+                                output3.get_Reference(),
+                                inputRec.get_Reference(),
+                                connection);
+
+                        errno = output2.getLsErrorNumber2();
+                        outputRes = output1.getLsOutputArray2();
+                        recordCountOut = output3.getLsArrayIndex2();
+                        break;
+                    }
+                    case 3: {
+                        LsAccountNumber3 input1 = new LsAccountNumber3();
+                        LsRecordArea3 inputRec = new LsRecordArea3();
+                        LsOutputArray3 output1 = new LsOutputArray3();
+                        LsErrorNumber3 output2 = new LsErrorNumber3();
+                        LsArrayIndex3 output3 = new LsArrayIndex3();
+
+                        input1.setLsAccountNumber3(String.format("%017d", new BigInteger(accno)));
+                        inputRec.setLsRecordArea3(inpcommonarea);
+
+                        wrapper.runUnit.Call("JVMCUSVCC3",
+                                input1.get_Reference(),
+                                output2.get_Reference(),
+                                output1.get_Reference(),
+                                output3.get_Reference(),
+                                inputRec.get_Reference(),
+                                connection);
+
+                        errno = output2.getLsErrorNumber3();
+                        outputRes = output1.getLsOutputArray3();
+                        recordCountOut = output3.getLsArrayIndex3();
+                        break;
+                    }
+                    case 4: {
+                        LsAccountNumber4 input1 = new LsAccountNumber4();
+                        LsRecordArea4 inputRec = new LsRecordArea4();
+                        LsOutputArray4 output1 = new LsOutputArray4();
+                        LsErrorNumber4 output2 = new LsErrorNumber4();
+                        LsArrayIndex4 output3 = new LsArrayIndex4();
+
+                        input1.setLsAccountNumber4(String.format("%017d", new BigInteger(accno)));
+                        inputRec.setLsRecordArea4(inpcommonarea);
+
+                        wrapper.runUnit.Call("JVMCUSVCC4",
+                                input1.get_Reference(),
+                                output2.get_Reference(),
+                                output1.get_Reference(),
+                                output3.get_Reference(),
+                                inputRec.get_Reference(),
+                                connection);
+
+                        errno = output2.getLsErrorNumber4();
+                        outputRes = output1.getLsOutputArray4();
+                        recordCountOut = output3.getLsArrayIndex4();
+                        break;
+                    }
+                    default:
+                        throw new IllegalStateException("Unexpected variant index: " + wrapper.variant);
+                }
+            }
+        } catch (SQLException e) {
+            logger.error("SQL Exception: {}", e.getMessage(), e);
+            errno = "3293";
+        } catch (Exception e) {
+            logger.error("Exception during COBOL call: {}", e.getMessage(), e);
+            errno = "3299";
+        }
+
+        // Process COBOL response
+        if (outputRes != null && !outputRes.trim().isEmpty()) {
+            int start = 0;
+            while (start + 98 <= outputRes.length()) {
+                String part = outputRes.substring(start, start + 98).trim();
+                if (part.isEmpty()) break;
+                allRecords.add(part);
+                start += 98;
+            }
+            errno = "0000";
+        }
+
+        String combinedOutput = String.join("", allRecords);
+        response.add(combinedOutput);
+        response.add(String.valueOf(Math.max(0, recordCountOut - 1)));
+        response.add(errno);
+
+        logger.info("VC---Balance_Enquiry_Child ended---VC | RefNo: {}", refno);
+        return response;
+    }
+
+    private static class RunUnitWrapper {
+        RunUnit runUnit;
+        Object cobolInstance;
+        Object lock;
+        int variant;
+
+        RunUnitWrapper(RunUnit runUnit, Object cobolInstance, Object lock, int variant) {
+            this.runUnit = runUnit;
+            this.cobolInstance = cobolInstance;
+            this.lock = lock;
+            this.variant = variant;
+        }
+    }
+}
