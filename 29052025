@@ -272,3 +272,173 @@ public class BalanceEnqService_Child {
         return result;
     }
 }
+
+----------------------
+
+package com.tcs.bancs.microservices.services;
+
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+import javax.sql.DataSource;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.microfocus.cobol.runtimeservices.RunUnit;
+
+import com.jvm.balance.JVMCUSVCC;
+import com.jvm.balance.JVMCUSVCC.*;
+import com.jvm.balance1.JVMCUSVCC1;
+import com.jvm.balance1.JVMCUSVCC1.*;
+
+public class BalanceEnqService_Child {
+
+    private static final Logger logger = LoggerFactory.getLogger(BalanceEnqService_Child.class);
+    private static final AtomicInteger counter = new AtomicInteger(0);
+
+    private static final int TOTAL_UNITS = 6;
+
+    private static final Lock[] locks = new Lock[TOTAL_UNITS];
+
+    private static final RunUnit sharedRunUnit1 = new RunUnit();
+    private static final RunUnit sharedRunUnit2 = new RunUnit();
+    private static final RunUnit sharedRunUnit3 = new RunUnit();
+    private static final RunUnit sharedRunUnit4 = new RunUnit();
+    private static final RunUnit sharedRunUnit5 = new RunUnit();
+    private static final RunUnit sharedRunUnit6 = new RunUnit();
+
+    private static final Object[] cobolInstances = new Object[TOTAL_UNITS];
+
+    static {
+        locks[0] = new ReentrantLock();
+        locks[1] = new ReentrantLock();
+        locks[2] = new ReentrantLock();
+        locks[3] = new ReentrantLock();
+        locks[4] = new ReentrantLock();
+        locks[5] = new ReentrantLock();
+
+        JVMCUSVCC cobol1 = new JVMCUSVCC();
+        JVMCUSVCC1 cobol2 = new JVMCUSVCC1();
+        JVMCUSVCC cobol3 = new JVMCUSVCC();
+        JVMCUSVCC1 cobol4 = new JVMCUSVCC1();
+        JVMCUSVCC cobol5 = new JVMCUSVCC();
+        JVMCUSVCC1 cobol6 = new JVMCUSVCC1();
+
+        sharedRunUnit1.Add(cobol1);
+        sharedRunUnit2.Add(cobol2);
+        sharedRunUnit3.Add(cobol3);
+        sharedRunUnit4.Add(cobol4);
+        sharedRunUnit5.Add(cobol5);
+        sharedRunUnit6.Add(cobol6);
+
+        cobolInstances[0] = cobol1;
+        cobolInstances[1] = cobol2;
+        cobolInstances[2] = cobol3;
+        cobolInstances[3] = cobol4;
+        cobolInstances[4] = cobol5;
+        cobolInstances[5] = cobol6;
+
+        logger.info("Shared RunUnits and COBOL objects initialized.");
+    }
+
+    public List<String> Balance_Enquiry_Child(String accno, DataSource datasource, String connectionString, String driverClass, String inpcommonarea, String refno) {
+        logger.info("VC---Balance_Enquiry_Child started---RefNo: {}", refno);
+
+        int index = counter.getAndIncrement() % TOTAL_UNITS;
+        Lock selectedLock = locks[index];
+        Object cobolObj = cobolInstances[index];
+
+        List<String> result = new ArrayList<>();
+        String outputRes = "", combinedRes = "", errno = "0000";
+        int recordCount = 0;
+
+        try {
+            if (selectedLock.tryLock(2, TimeUnit.SECONDS)) {
+                try {
+                    if (cobolObj instanceof JVMCUSVCC) {
+                        LsAccountNumber input1 = new LsAccountNumber();
+                        LsConnectionUrl input2 = new LsConnectionUrl();
+                        LsDriverClass input3 = new LsDriverClass();
+                        LsRecordArea inputRec = new LsRecordArea();
+                        LsOutputArray output1 = new LsOutputArray();
+                        LsErrorNumber output2 = new LsErrorNumber();
+                        LsArrayIndex output3 = new LsArrayIndex();
+                        LsErrorFlag output4 = new LsErrorFlag();
+
+                        input1.setLsAccountNumber(String.format("%017d", new BigInteger(accno)));
+                        input2.setLsConnectionUrl(connectionString);
+                        input3.setLsDriverClass(driverClass);
+                        inputRec.setLsRecordArea(inpcommonarea);
+
+                        ((JVMCUSVCC) cobolObj).Balance_Enquiry(
+                            input1.get_Reference(), input2.get_Reference(), input3.get_Reference(),
+                            output4.get_Reference(), output2.get_Reference(), output1.get_Reference(),
+                            output3.get_Reference(), inputRec.get_Reference());
+
+                        errno = output2.getLsErrorNumber();
+                        outputRes = output1.getLsOutputArray();
+                        recordCount = output3.getLsArrayIndex();
+
+                    } else if (cobolObj instanceof JVMCUSVCC1) {
+                        LsAccountNumber1 input1 = new LsAccountNumber1();
+                        LsConnectionUrl1 input2 = new LsConnectionUrl1();
+                        LsDriverClass1 input3 = new LsDriverClass1();
+                        LsRecordArea1 inputRec = new LsRecordArea1();
+                        LsOutputArray1 output1 = new LsOutputArray1();
+                        LsErrorNumber1 output2 = new LsErrorNumber1();
+                        LsArrayIndex1 output3 = new LsArrayIndex1();
+                        LsErrorFlag1 output4 = new LsErrorFlag1();
+
+                        input1.setLsAccountNumber1(String.format("%017d", new BigInteger(accno)));
+                        input2.setLsConnectionUrl1(connectionString);
+                        input3.setLsDriverClass1(driverClass);
+                        inputRec.setLsRecordArea1(inpcommonarea);
+
+                        ((JVMCUSVCC1) cobolObj).Balance_Enquiry1(
+                            input1.get_Reference(), input2.get_Reference(), input3.get_Reference(),
+                            output4.get_Reference(), output2.get_Reference(), output1.get_Reference(),
+                            output3.get_Reference(), inputRec.get_Reference());
+
+                        errno = output2.getLsErrorNumber1();
+                        outputRes = output1.getLsOutputArray1();
+                        recordCount = output3.getLsArrayIndex1();
+                    }
+
+                    List<String> allRecords = new ArrayList<>();
+                    for (int i = 0; i + 98 <= outputRes.length(); i += 98) {
+                        String chunk = outputRes.substring(i, i + 98).trim();
+                        if (chunk.isEmpty()) break;
+                        allRecords.add(chunk);
+                    }
+
+                    combinedRes = String.join("", allRecords);
+                    if (combinedRes.trim().isEmpty()) {
+                        errno = "9999";
+                    }
+
+                } finally {
+                    selectedLock.unlock();
+                }
+            } else {
+                logger.warn("Timeout acquiring lock for Balance Enquiry.");
+                errno = "0155";
+            }
+        } catch (Exception e) {
+            logger.error("Exception during Balance Enquiry: {}", e.getMessage(), e);
+            errno = "3293";
+        }
+
+        result.add(combinedRes);
+        result.add(String.valueOf(recordCount - 1));
+        result.add(errno);
+
+        logger.info("VC---Balance_Enquiry_Child ended---RefNo: {}", refno);
+        return result;
+    }
+}
