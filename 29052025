@@ -442,3 +442,143 @@ public class BalanceEnqService_Child {
         return result;
     }
 }
+
+-------------
+
+
+package com.tcs.bancs.microservices.services;
+
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+import javax.sql.DataSource;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.microfocus.cobol.runtimeservices.RunUnit;
+import com.jvm.balance.JVMCUSVCC;
+import com.jvm.balance1.JVMCUSVCC1;
+import com.jvm.balance.JVMCUSVCC.*;
+import com.jvm.balance1.JVMCUSVCC1.*;
+
+public class BalanceEnqService_Child {
+
+    private static final Logger logger = LoggerFactory.getLogger(BalanceEnqService_Child.class);
+    private static final AtomicInteger counter = new AtomicInteger(0);
+
+    private static final Lock[] locks = new Lock[10];
+    private static final RunUnit[] sharedRunUnits = new RunUnit[10];
+    private static final Object[] sharedJvms = new Object[10]; // Can hold JVMCUSVCC or JVMCUSVCC1
+
+    static {
+        for (int i = 0; i < 10; i++) {
+            locks[i] = new ReentrantLock();
+            sharedRunUnits[i] = new RunUnit();
+            if (i % 2 == 0) {
+                sharedJvms[i] = new JVMCUSVCC();
+                sharedRunUnits[i].Add((JVMCUSVCC) sharedJvms[i]);
+            } else {
+                sharedJvms[i] = new JVMCUSVCC1();
+                sharedRunUnits[i].Add((JVMCUSVCC1) sharedJvms[i]);
+            }
+        }
+        logger.info("Initialized 10 shared RunUnits alternating between JVMCUSVCC and JVMCUSVCC1.");
+    }
+
+    public List<String> Balance_Enquiry_Child(String accno, DataSource datasource, String connectionString, String driverClass, String inpcommonarea, String refno) {
+        logger.info("VC---Balance_Enquiry_Child started---RefNo: {}", refno);
+
+        int index = counter.getAndIncrement() % 10;
+        RunUnit selectedRunUnit = sharedRunUnits[index];
+        Lock selectedLock = locks[index];
+
+        List<String> result = new ArrayList<>();
+        String outputRes = "", combinedRes = "", errno = "0000";
+        int recordCount = 0;
+
+        try {
+            if (selectedLock.tryLock(2, TimeUnit.SECONDS)) {
+                try {
+                    if (index % 2 == 0) {
+                        // JVMCUSVCC (even indices)
+                        LsAccountNumber input1 = new LsAccountNumber();
+                        LsConnectionUrl input2 = new LsConnectionUrl();
+                        LsDriverClass input3 = new LsDriverClass();
+                        LsRecordArea inputRec = new LsRecordArea();
+                        LsOutputArray output1 = new LsOutputArray();
+                        LsErrorNumber output2 = new LsErrorNumber();
+                        LsArrayIndex output3 = new LsArrayIndex();
+                        LsErrorFlag output4 = new LsErrorFlag();
+
+                        input1.setLsAccountNumber(String.format("%017d", new BigInteger(accno)));
+                        input2.setLsConnectionUrl(connectionString);
+                        input3.setLsDriverClass(driverClass);
+                        inputRec.setLsRecordArea(inpcommonarea);
+
+                        selectedRunUnit.Call("JVMCUSVCC", input1.get_Reference(), input2.get_Reference(), input3.get_Reference(), output4.get_Reference(), output2.get_Reference(), output1.get_Reference(), output3.get_Reference(), inputRec.get_Reference());
+
+                        errno = output2.getLsErrorNumber();
+                        outputRes = output1.getLsOutputArray();
+                        recordCount = output3.getLsArrayIndex();
+
+                    } else {
+                        // JVMCUSVCC1 (odd indices)
+                        LsAccountNumber1 input1 = new LsAccountNumber1();
+                        LsConnectionUrl1 input2 = new LsConnectionUrl1();
+                        LsDriverClass1 input3 = new LsDriverClass1();
+                        LsRecordArea1 inputRec = new LsRecordArea1();
+                        LsOutputArray1 output1 = new LsOutputArray1();
+                        LsErrorNumber1 output2 = new LsErrorNumber1();
+                        LsArrayIndex1 output3 = new LsArrayIndex1();
+                        LsErrorFlag1 output4 = new LsErrorFlag1();
+
+                        input1.setLsAccountNumber1(String.format("%017d", new BigInteger(accno)));
+                        input2.setLsConnectionUrl1(connectionString);
+                        input3.setLsDriverClass1(driverClass);
+                        inputRec.setLsRecordArea1(inpcommonarea);
+
+                        selectedRunUnit.Call("JVMCUSVCC1", input1.get_Reference(), input2.get_Reference(), input3.get_Reference(), output4.get_Reference(), output2.get_Reference(), output1.get_Reference(), output3.get_Reference(), inputRec.get_Reference());
+
+                        errno = output2.getLsErrorNumber1();
+                        outputRes = output1.getLsOutputArray1();
+                        recordCount = output3.getLsArrayIndex1();
+                    }
+
+                    List<String> allRecords = new ArrayList<>();
+                    for (int i = 0; i + 98 <= outputRes.length(); i += 98) {
+                        String chunk = outputRes.substring(i, i + 98).trim();
+                        if (chunk.isEmpty()) break;
+                        allRecords.add(chunk);
+                    }
+
+                    combinedRes = String.join("", allRecords);
+                    if (combinedRes.trim().isEmpty()) {
+                        errno = "0001";
+                    }
+
+                } finally {
+                    selectedLock.unlock();
+                }
+            } else {
+                logger.warn("Timeout acquiring lock for Balance Enquiry.");
+                errno = "0155";
+            }
+        } catch (Exception e) {
+            logger.error("Exception during Balance Enquiry: {}", e.getMessage(), e);
+            errno = "3293";
+        }
+
+        result.add(combinedRes);
+        result.add(String.valueOf(recordCount - 1));
+        result.add(errno);
+
+        logger.info("VC---Balance_Enquiry_Child ended---RefNo: {}", refno);
+        return result;
+    }
+}
