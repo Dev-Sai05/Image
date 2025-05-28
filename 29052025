@@ -1,0 +1,144 @@
+package com.tcs.bancs.microservices.services;
+
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+import javax.sql.DataSource;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.microfocus.cobol.runtimeservices.RunUnit;
+import com.jvm.balance.JVMCUSVCC;
+import com.jvm.balance1.JVMCUSVCC1;
+import com.jvm.balance.JVMCUSVCC.*;
+
+public class BalanceEnqService_Child {
+
+
+    private static final Logger logger = LoggerFactory.getLogger(BalanceEnqService_Child.class);
+    private static final AtomicInteger counter = new AtomicInteger(0);
+
+    private static final Lock lock1 = new ReentrantLock();
+    private static final Lock lock2 = new ReentrantLock();
+    private static final Lock lock3 = new ReentrantLock();
+    private static final Lock lock4 = new ReentrantLock();
+    private static final Lock lock5 = new ReentrantLock();
+
+    private static final RunUnit sharedRunUnit1;
+    private static final RunUnit sharedRunUnit2;
+    private static final RunUnit sharedRunUnit3;
+    private static final RunUnit sharedRunUnit4;
+    private static final RunUnit sharedRunUnit5;
+
+    private static final JVMCUSVCC sharedJvm1;
+    private static final JVMCUSVCC sharedJvm2;
+    private static final JVMCUSVCC sharedJvm3;
+    private static final JVMCUSVCC sharedJvm4;
+    private static final JVMCUSVCC sharedJvm5;
+
+    static {
+        sharedRunUnit1 = new RunUnit();
+        sharedJvm1 = new JVMCUSVCC();
+        sharedRunUnit1.Add(sharedJvm1);
+
+        sharedRunUnit2 = new RunUnit();
+        sharedJvm2 = new JVMCUSVCC();
+        sharedRunUnit2.Add(sharedJvm2);
+
+        sharedRunUnit3 = new RunUnit();
+        sharedJvm3 = new JVMCUSVCC();
+        sharedRunUnit3.Add(sharedJvm3);
+
+        sharedRunUnit4 = new RunUnit();
+        sharedJvm4 = new JVMCUSVCC();
+        sharedRunUnit4.Add(sharedJvm4);
+
+        sharedRunUnit5 = new RunUnit();
+        sharedJvm5 = new JVMCUSVCC();
+        sharedRunUnit5.Add(sharedJvm5);
+
+        logger.info("Shared RunUnits 1-5 initialized for Balance Enquiry.");
+    }
+
+    public List<String> Balance_Enquiry_Child(String accno, DataSource datasource, String connectionString, String driverClass, String inpcommonarea, String refno) {
+        logger.info("VC---Balance_Enquiry_Child started---RefNo: {}", refno);
+
+        int index = counter.getAndIncrement() % 5;
+
+        RunUnit selectedRunUnit;
+        JVMCUSVCC selectedJvm;
+        Lock selectedLock;
+
+        switch (index) {
+            case 0 : { selectedRunUnit = sharedRunUnit1; selectedJvm = sharedJvm1; selectedLock = lock1; }
+            case 1 : { selectedRunUnit = sharedRunUnit2; selectedJvm = sharedJvm2; selectedLock = lock2; }
+            case 2 : { selectedRunUnit = sharedRunUnit3; selectedJvm = sharedJvm3; selectedLock = lock3; }
+            case 3 : { selectedRunUnit = sharedRunUnit4; selectedJvm = sharedJvm4; selectedLock = lock4; }
+            default:  { selectedRunUnit = sharedRunUnit5; selectedJvm = sharedJvm5; selectedLock = lock5; }
+        }
+
+        List<String> result = new ArrayList<>();
+        String outputRes = "", combinedRes = "", errno = "0000";
+        int recordCount = 0;
+
+        // COBOL input/output setup
+        LsAccountNumber input1 = new LsAccountNumber();
+        LsConnectionUrl input2 = new LsConnectionUrl();
+        LsDriverClass input3 = new LsDriverClass();
+        LsRecordArea inputRec = new LsRecordArea();
+        LsOutputArray output1 = new LsOutputArray();
+        LsErrorNumber output2 = new LsErrorNumber();
+        LsArrayIndex output3 = new LsArrayIndex();
+        LsErrorFlag output4 = new LsErrorFlag();
+
+        input1.setLsAccountNumber(String.format("%017d", new BigInteger(accno)));
+        input2.setLsConnectionUrl(connectionString);
+        input3.setLsDriverClass(driverClass);
+        inputRec.setLsRecordArea(inpcommonarea);
+
+        try {
+            if (selectedLock.tryLock(2, TimeUnit.SECONDS)) {
+                try {
+                    selectedRunUnit.Call("JVMCUSVCC", input1.get_Reference(), input2.get_Reference(), input3.get_Reference(), output4.get_Reference(), output2.get_Reference(), output1.get_Reference(), output3.get_Reference(), inputRec.get_Reference());
+
+                    errno = output2.getLsErrorNumber();
+                    outputRes = output1.getLsOutputArray();
+                    recordCount = output3.getLsArrayIndex();
+
+                    List<String> allRecords = new ArrayList<>();
+                    for (int i = 0; i + 98 <= outputRes.length(); i += 98) {
+                        String chunk = outputRes.substring(i, i + 98).trim();
+                        if (chunk.isEmpty()) break;
+                        allRecords.add(chunk);
+                    }
+
+                    combinedRes = String.join("", allRecords);
+                    if (combinedRes.trim().isEmpty()) {
+                        errno = output2.getLsErrorNumber();
+                    }
+
+                } finally {
+                    selectedLock.unlock();
+                }
+            } else {
+                logger.warn("Timeout acquiring lock for Balance Enquiry.");
+                errno = "0155";
+            }
+        } catch (Exception e) {
+            logger.error("Exception during Balance Enquiry: {}", e.getMessage(), e);
+            errno = "3293";
+        }
+
+        result.add(combinedRes);
+        result.add(String.valueOf(recordCount - 1));
+        result.add(errno);
+
+        logger.info("VC---Balance_Enquiry_Child ended---RefNo: {}", refno);
+        return result;
+    }
+}
